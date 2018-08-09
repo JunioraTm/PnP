@@ -33,11 +33,14 @@ namespace Contoso.Core.ProfilePictureUploader
         const string _sPOProfilePrefix = "i:0#.f|membership|";
         const string _profileSiteTemplateUrl = "https://{0}-admin.sharepoint.com";
         const string _mySiteHostTemplateUrl = "https://{0}-my.sharepoint.com";
-
+        const string defaultConfigFilePath = "configuration.xml";
 
         enum LogLevel { Information, Warning, Error };
 
         //tenant admin username and password, used for connecting to SPO
+        static bool _doNotCloseConsole = false;
+        static bool _sPoAuthProvided = false;
+        static bool _imageAuthProvided = false;
         static string _sPoAuthUserName = string.Empty;
         static string _sPoAuthPasword = string.Empty;
         static string _sourceUserName = string.Empty;
@@ -75,8 +78,27 @@ namespace Contoso.Core.ProfilePictureUploader
                                 if (count > 0)
                                 {
                                     row = line.Split(',');
-                                    sPoUserProfileName = row[0]; //first column must be profile username e.g. UPN from O365
-                                    sourcePictureUrl = row[1]; //second column must be source picture path, e.g. c:\temp\pic.jpg, or \\server\path\pic.jpg or http://server/path/pic.jpg
+
+                                    //first column must be profile username e.g. UPN from O365
+                                    sPoUserProfileName = row[0];
+
+                                    //second column must be source picture path, e.g. c:\temp\pic.jpg, or \\server\path\pic.jpg or http://server/path/pic.jpg
+                                    if (row.Length > 2)
+                                    {
+                                        var value = row[1];
+                                        // Combine back all additional splits
+                                        for (int i = 2; i < row.Length; i++)
+                                        {
+                                            value += "," + row[i];
+                                        }
+
+                                        // Sets the source picture to the combined string
+                                        sourcePictureUrl = value.Replace("\"", ""); // Removes extra slashes and quotes that get added
+                                    }
+                                    else
+                                    {
+                                        sourcePictureUrl = row[1];
+                                    }
 
                                     LogMessage("Begin processing for user " + sPoUserProfileName, LogLevel.Warning);
 
@@ -115,8 +137,14 @@ namespace Contoso.Core.ProfilePictureUploader
                 }
             }
 
+            // Reduces Displayed Count to Account for Header Row
+            LogMessage("Processing finished for " + (count - 1) + " user profiles (or so)", LogLevel.Information);
 
-            LogMessage("Processing finished for " + count + " user profiles (or so)", LogLevel.Information);
+            // Determine if Console should remain open
+            if (_doNotCloseConsole)
+            {
+                Console.ReadKey();
+            }
         }
 
 
@@ -142,24 +170,26 @@ namespace Contoso.Core.ProfilePictureUploader
                     _sourcePassword = args[i + 1];
             }
 
-            if ((_sPoAuthUserName.Length == 0) || (_sPoAuthPasword.Length == 0) || (_configfilepath.Length == 0))
+            // Sets Default Config File Path
+            if (_configfilepath.Length == 0)
             {
-                //show usage command
-                Console.WriteLine();
-                Console.WriteLine("Error: SPO admin username, password and configuration file path are three required arguments");
-                Console.WriteLine();
-                Console.WriteLine("Usage:");
-                Console.WriteLine("      ProfilePictureUploader.exe -SPOAdmin value -SPOAdminPassword value -Configuration value [-SourceUser] [-SourcePassword]");
-                Console.WriteLine();
-                Console.WriteLine("Examples:");
-                Console.WriteLine("         ProfilePictureUploader.exe -SPOAdmin user@contoso.onmicrosoft.com -SPOAdminPassword password -Configuration configuration.xml");
-                Console.WriteLine("         ProfilePictureUploader.exe -SPOAdmin user@contoso.onmicrosoft.com -SPOAdminPassword password -Configuration configuration.xml -SourceUser contoso\\username -SourcePassword password");
-                Console.WriteLine();
-                return false;
-
+                _configfilepath = defaultConfigFilePath;
             }
 
-            if (!_configfilepath.Contains(":")) //if they didnt put full path to configuration file, assume current exe file path 
+            // Indicates Admin Auth Provided
+            if (_sPoAuthUserName.Length > 0 && _sPoAuthPasword.Length > 0)
+            {
+                _sPoAuthProvided = true;
+            }
+
+            // Indicates Image Auth Provided
+            if (_sourceUserName.Length > 0 && _sourcePassword.Length > 0)
+            {
+                _imageAuthProvided = true;
+            }
+
+            // If they didnt put full path to configuration file, assume current exe file path 
+            if (!_configfilepath.Contains(":")) 
                 _configfilepath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "\\" + _configfilepath;
 
             return true;
@@ -187,9 +217,11 @@ namespace Contoso.Core.ProfilePictureUploader
                 // Calls the Deserialize method and casts to the object type.
                 _appConfig = (Configuration)mySerializer.Deserialize(myFileStream);
 
+                // Sets if console should remain open
+                _doNotCloseConsole = _appConfig.DoNotCloseConsole;
+
                 if (_appConfig.TenantName.Length == 0 || _appConfig.PictureSourceCsv.Length == 0)
                 {
-
                     LogMessage("Missing tenant name or pictureSourceCsv path from configuration file " + _configfilepath, LogLevel.Error);
                     return false;
                 }
@@ -208,6 +240,42 @@ namespace Contoso.Core.ProfilePictureUploader
 
                 _profileSiteUrl = string.Format(_profileSiteTemplateUrl, _appConfig.TenantName); //build URL for admin site e.g. https://tenantname-admin.sharepoint.com
                 _mySiteUrl = string.Format(_mySiteHostTemplateUrl, _appConfig.TenantName); //build URL for my site host e.g. https://tenantname-my.sharepoint.com
+
+                if (!_sPoAuthProvided)
+                {
+                    // Get Admin Credentials from Config file
+                    _sPoAuthUserName = _appConfig.SPOAdmin;
+                    _sPoAuthPasword = _appConfig.SPOAdminPassword;
+
+                    // Validates Credentials contain Data
+                    if (_sPoAuthUserName == null || _sPoAuthPasword == null || _sPoAuthUserName.Length == 0 || _sPoAuthPasword.Length == 0)
+                    {
+                        //show usage command
+                        Console.WriteLine();
+                        Console.WriteLine("Error: SPO admin username and password are required arguments");
+                        Console.WriteLine();
+                        Console.WriteLine("Usage: Option 1 - Config File:");
+                        Console.WriteLine("      Add nodes for account <spoAdmin>[username/email]</spoAdmin> and password <spoAdminPassword>[password]</spoAdminPassword>");
+                        Console.WriteLine();
+                        Console.WriteLine("Usage: Option 2 - Console:");
+                        Console.WriteLine("      ProfilePictureUploader.exe -SPOAdmin value -SPOAdminPassword value -Configuration value [-SourceUser] [-SourcePassword]");
+                        Console.WriteLine();
+                        Console.WriteLine("Examples:");
+                        Console.WriteLine("         ProfilePictureUploader.exe -SPOAdmin user@contoso.onmicrosoft.com -SPOAdminPassword password -Configuration configuration.xml");
+                        Console.WriteLine("         ProfilePictureUploader.exe -SPOAdmin user@contoso.onmicrosoft.com -SPOAdminPassword password -Configuration configuration.xml -SourceUser contoso\\username -SourcePassword password");
+                        Console.WriteLine();
+                        return false;
+                    }
+                }
+
+                // Checks Config File for Image Auth
+                if (!_imageAuthProvided && _appConfig.ImageSourceUser != null && _appConfig.ImageSourcePassword != null)
+                {
+                    // Pull Image Credentials from Config file
+                    _sourceUserName = _appConfig.ImageSourceUser;
+                    _sourcePassword = _appConfig.ImageSourcePassword;
+                }
+
                 return true;
             }
             catch (Exception ex)

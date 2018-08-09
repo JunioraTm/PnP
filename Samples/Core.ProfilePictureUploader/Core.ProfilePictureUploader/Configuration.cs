@@ -23,6 +23,16 @@ namespace Contoso.Core.ProfilePictureUploader
         public LogFile LogFile;
         [System.Xml.Serialization.XmlElementAttribute("uploadDelay")]
         public int UploadDelay;
+        [System.Xml.Serialization.XmlElementAttribute("doNotCloseConsole")]
+        public bool DoNotCloseConsole;
+        [System.Xml.Serialization.XmlElementAttribute("spoAdmin")]
+        public string SPOAdmin;
+        [System.Xml.Serialization.XmlElementAttribute("spoAdminPassword")]
+        public string SPOAdminPassword;
+        [System.Xml.Serialization.XmlElementAttribute("imageSourceUser")]
+        public string ImageSourceUser;
+        [System.Xml.Serialization.XmlElementAttribute("imageSourcePassword")]
+        public string ImageSourcePassword;
     }
 
     [System.Xml.Serialization.XmlRootAttribute("thumbs")]
